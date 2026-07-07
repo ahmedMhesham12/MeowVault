@@ -1,0 +1,22 @@
+.DS_Store
+/.build/
+/dist/*
+!/dist/
+!/dist/MeowVault.dmg
+/DerivedData/
+/.swiftpm/
+xcuserdata/
+*.xcuserstate
+
+# Local secrets and machine state
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.mobileprovision
+.netrc
+
+# Local install helpers generated outside source packaging
+*.command
