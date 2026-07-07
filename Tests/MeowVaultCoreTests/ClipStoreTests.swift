@@ -21,6 +21,37 @@ import Testing
     #expect(store.visibleItems.map(\.preview) == ["first", "second"])
 }
 
+@Test func limitKeepsPinnedItemsFirstAndTrimsOldUnpinnedItems() {
+    var tick = 0
+    let store = ClipStore(limit: 3) {
+        defer { tick += 1 }
+        return Date(timeIntervalSince1970: TimeInterval(tick))
+    }
+
+    let first = store.capture(.text("first"))
+    store.togglePin(first.id)
+    store.capture(.text("second"))
+    store.capture(.text("third"))
+    store.capture(.text("fourth"))
+
+    #expect(store.visibleItems.map(\.preview) == ["first", "fourth", "third"])
+}
+
+@Test func changingLimitImmediatelyTrimsHistory() {
+    var tick = 0
+    let store = ClipStore(limit: 5) {
+        defer { tick += 1 }
+        return Date(timeIntervalSince1970: TimeInterval(tick))
+    }
+
+    store.capture(.text("first"))
+    store.capture(.text("second"))
+    store.capture(.text("third"))
+    store.setLimit(2)
+
+    #expect(store.visibleItems.map(\.preview) == ["third", "second"])
+}
+
 @Test func searchMatchesPreviewAndGroups() {
     let store = ClipStore(now: Date.init)
     store.capture(.text("https://meowvault.dev"))

@@ -327,6 +327,8 @@ final class AppModel {
     var settingsMessage = ""
     var actionMessage = ""
     var copiedItemID: ClipItem.ID?
+    var keepHistoryAfterRestart: Bool
+    var historyLimit: Int
     var theme: AppTheme {
         didSet {
             UserDefaults.standard.set(theme.rawValue, forKey: "appTheme")
@@ -340,15 +342,32 @@ final class AppModel {
     private let passwordManager = PasswordManager()
     private let monitor = ClipboardMonitor()
 
+    private static let keepHistoryAfterRestartKey = "keepHistoryAfterRestart"
+    private static let historyLimitKey = "historyLimit"
+    private static let defaultHistoryLimit = 200
+    private static let minHistoryLimit = 20
+    private static let maxHistoryLimit = 1_000
+
     init() {
         let keyData = Self.loadStorageKey()
         persistence = ClipPersistence(keyData: keyData)
         let savedTheme = UserDefaults.standard.string(forKey: "appTheme").flatMap(AppTheme.init(rawValue:)) ?? .system
         theme = savedTheme
+        let savedKeepHistoryAfterRestart = Self.savedKeepHistoryAfterRestart()
+        let savedHistoryLimit = Self.savedHistoryLimit()
+        keepHistoryAfterRestart = savedKeepHistoryAfterRestart
+        historyLimit = savedHistoryLimit
         isLocked = passwordManager.hasPassword
-        store = ClipStore(items: persistence.load())
+        let loadedItems = persistence.load()
+        store = ClipStore(
+            items: savedKeepHistoryAfterRestart ? loadedItems : loadedItems.filter(\.isPinned),
+            limit: savedHistoryLimit
+        )
         items = store.visibleItems
         selectedItemID = Self.latestItemID(in: items)
+        if !savedKeepHistoryAfterRestart {
+            persistence.save(Self.persistableItems(from: items, keepHistoryAfterRestart: false))
+        }
         ensureLaunchAtLogin()
     }
 
@@ -372,6 +391,24 @@ final class AppModel {
 
     var selectedItem: ClipItem? {
         filteredItems.first { $0.id == selectedItemID } ?? filteredItems.first
+    }
+
+    func setKeepHistoryAfterRestart(_ value: Bool) {
+        keepHistoryAfterRestart = value
+        UserDefaults.standard.set(value, forKey: Self.keepHistoryAfterRestartKey)
+        syncAndSave()
+        settingsMessage = value
+            ? "Restart keeps all clips"
+            : "Restart keeps pinned clips only"
+    }
+
+    func setHistoryLimit(_ value: Int) {
+        let clampedValue = Self.clampedHistoryLimit(value)
+        historyLimit = clampedValue
+        UserDefaults.standard.set(clampedValue, forKey: Self.historyLimitKey)
+        store.setLimit(clampedValue)
+        syncAndSave()
+        settingsMessage = "History limit set to \(clampedValue)"
     }
 
     func startClipboardMonitor() {
@@ -490,11 +527,33 @@ final class AppModel {
         } else if selectedItemID == nil || !items.contains(where: { $0.id == selectedItemID }) {
             selectedItemID = Self.latestItemID(in: items)
         }
-        persistence.save(items)
+        persistence.save(Self.persistableItems(from: items, keepHistoryAfterRestart: keepHistoryAfterRestart))
     }
 
     private static func latestItemID(in items: [ClipItem]) -> ClipItem.ID? {
         items.max { $0.createdAt < $1.createdAt }?.id
+    }
+
+    private static func persistableItems(from items: [ClipItem], keepHistoryAfterRestart: Bool) -> [ClipItem] {
+        keepHistoryAfterRestart ? items : items.filter(\.isPinned)
+    }
+
+    private static func savedKeepHistoryAfterRestart() -> Bool {
+        guard let savedValue = UserDefaults.standard.object(forKey: keepHistoryAfterRestartKey) as? Bool else {
+            return true
+        }
+        return savedValue
+    }
+
+    private static func savedHistoryLimit() -> Int {
+        guard let savedValue = UserDefaults.standard.object(forKey: historyLimitKey) as? Int else {
+            return defaultHistoryLimit
+        }
+        return clampedHistoryLimit(savedValue)
+    }
+
+    private static func clampedHistoryLimit(_ value: Int) -> Int {
+        min(max(value, minHistoryLimit), maxHistoryLimit)
     }
 }
 
@@ -524,7 +583,7 @@ final class ClipboardMonitor {
             return nil
         }
 
-        if let image = NSImage(pasteboard: pasteboard), let data = image.tiffRepresentation {
+        if let image = NSImage(pasteboard: pasteboard), let data = Self.compactImageData(from: image) {
             return .image(data: data)
         }
 
@@ -533,6 +592,16 @@ final class ClipboardMonitor {
         }
 
         return nil
+    }
+
+    private static func compactImageData(from image: NSImage) -> Data? {
+        guard
+            let tiffData = image.tiffRepresentation,
+            let bitmap = NSBitmapImageRep(data: tiffData)
+        else {
+            return image.tiffRepresentation
+        }
+        return bitmap.representation(using: .png, properties: [:]) ?? tiffData
     }
 }
 
@@ -588,9 +657,12 @@ struct ClipPersistence {
         if
             let encrypted = try? Data(contentsOf: encryptedURL),
             let data = try? SecureEnvelope.decrypt(encrypted, keyData: keyData),
-            let items = try? JSONDecoder().decode([ClipItem].self, from: data)
+            let decoded = Self.decodeEncryptedPayload(data)
         {
-            return items
+            if decoded.needsRewrite {
+                save(decoded.items)
+            }
+            return decoded.items
         }
 
         guard let data = try? Data(contentsOf: legacyURL) else { return [] }
@@ -602,9 +674,33 @@ struct ClipPersistence {
 
     func save(_ items: [ClipItem]) {
         guard let data = try? JSONEncoder().encode(items) else { return }
-        guard let encrypted = try? SecureEnvelope.encrypt(data, keyData: keyData) else { return }
+        let compressedData = Self.compress(data)
+        guard let encrypted = try? SecureEnvelope.encrypt(compressedData, keyData: keyData) else { return }
         try? encrypted.write(to: encryptedURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: encryptedURL.path)
+    }
+
+    private static func decodeEncryptedPayload(_ data: Data) -> (items: [ClipItem], needsRewrite: Bool)? {
+        if
+            let decompressedData = decompress(data),
+            let items = try? JSONDecoder().decode([ClipItem].self, from: decompressedData)
+        {
+            return (items, false)
+        }
+
+        if let items = try? JSONDecoder().decode([ClipItem].self, from: data) {
+            return (items, true)
+        }
+
+        return nil
+    }
+
+    private static func compress(_ data: Data) -> Data {
+        ((try? (data as NSData).compressed(using: .zlib)) as Data?) ?? data
+    }
+
+    private static func decompress(_ data: Data) -> Data? {
+        (try? (data as NSData).decompressed(using: .zlib)) as Data?
     }
 }
 
@@ -1074,6 +1170,26 @@ struct SettingsView: View {
 
             Divider()
 
+            Text("History")
+                .font(.headline)
+            Toggle("Keep history after restart", isOn: Binding(
+                get: { model.keepHistoryAfterRestart },
+                set: { model.setKeepHistoryAfterRestart($0) }
+            ))
+            .help("When off, only pinned clips are saved to disk and restored after restart.")
+            Text(model.keepHistoryAfterRestart
+                ? "All clips are saved locally."
+                : "Only pinned clips are saved locally.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Stepper("History limit: \(model.historyLimit)", value: Binding(
+                get: { model.historyLimit },
+                set: { model.setHistoryLimit($0) }
+            ), in: 20...1000, step: 20)
+            .help("Limit how many clips MeowVault keeps. Pinned clips stay first.")
+
+            Divider()
+
             Text("App Password")
                 .font(.headline)
             SecureField("New password", text: $model.settingsPassword)
@@ -1119,6 +1235,6 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(22)
-        .frame(width: 430, height: 440)
+        .frame(width: 460, height: 560)
     }
 }

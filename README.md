@@ -11,12 +11,16 @@ Fast native macOS clipboard history in the menu bar.
 - Search clipboard history
 - Smart groups: links, code, images, emails, text
 - Pin important clips
+- Keep pinned clips first
 - Duplicate cleanup
 - Quick preview
 - Copy as plain text
 - Text, link, and image clipboard support
+- Compact PNG storage for copied images when possible
 - Open-at-login toggle
-- Local encrypted clipboard storage
+- Local encrypted and compressed clipboard storage
+- Restart retention setting: keep all clips or pinned clips only
+- Configurable history limit
 - Optional app password lock
 - Light, dark, and system appearance
 
@@ -55,7 +59,9 @@ MeowVault stores clipboard history locally under:
 ~/Library/Application Support/MeowVault/
 ```
 
-The clipboard database is encrypted as `clips.enc`. The local encryption key is generated per user in `storage.key` with `0600` permissions.
+The clipboard database is compressed, then encrypted as `clips.enc`. The local encryption key is generated per user in `storage.key` with `0600` permissions.
+
+In Settings, users can choose whether restart keeps all clips or only pinned clips. The history limit is also configurable, and pinned clips are kept first when the list is trimmed.
 
 The optional app password locks the MeowVault window. It is separate from storage encryption.
 

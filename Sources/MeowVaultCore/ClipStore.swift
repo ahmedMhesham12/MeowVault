@@ -3,11 +3,14 @@ import Foundation
 
 public final class ClipStore {
     public private(set) var items: [ClipItem]
+    public private(set) var limit: Int
     private let now: () -> Date
 
-    public init(items: [ClipItem] = [], now: @escaping () -> Date = Date.init) {
+    public init(items: [ClipItem] = [], limit: Int = 200, now: @escaping () -> Date = Date.init) {
         self.items = items
+        self.limit = Self.clampedLimit(limit)
         self.now = now
+        trimToLimit()
     }
 
     @discardableResult
@@ -33,7 +36,7 @@ public final class ClipStore {
             isPinned: existing?.isPinned ?? false
         )
         items = [item] + retainedItems
-        trim(limit: 200)
+        trimToLimit()
         return item
     }
 
@@ -64,6 +67,7 @@ public final class ClipStore {
     public func togglePin(_ id: ClipItem.ID) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].isPinned.toggle()
+        trimToLimit()
     }
 
     public func remove(_ id: ClipItem.ID) {
@@ -72,12 +76,20 @@ public final class ClipStore {
 
     public func replaceItems(_ nextItems: [ClipItem]) {
         items = nextItems
+        trimToLimit()
     }
 
-    private func trim(limit: Int) {
-        let pinned = items.filter(\.isPinned)
-        let unpinned = items.filter { !$0.isPinned }
-        items = Array((pinned + unpinned).prefix(limit))
+    public func setLimit(_ nextLimit: Int) {
+        limit = Self.clampedLimit(nextLimit)
+        trimToLimit()
+    }
+
+    private func trimToLimit() {
+        items = Array(visibleItems.prefix(limit))
+    }
+
+    private static func clampedLimit(_ value: Int) -> Int {
+        min(max(value, 1), 5_000)
     }
 
     private static func preview(for payload: ClipPayload) -> String {
