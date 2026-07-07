@@ -1,5 +1,7 @@
 # MeowVault
 
+![MeowVault banner](assets/banner.png)
+
 Fast native macOS clipboard history in the menu bar.
 
 ## Features
@@ -59,11 +61,13 @@ The optional app password locks the MeowVault window. It is separate from storag
 
 ## Download
 
-The packaged DMG is included at:
+Download the latest DMG from GitHub Releases, or use the packaged DMG included in the repo:
 
 ```text
 dist/MeowVault.dmg
 ```
+
+Install by opening the DMG and dragging `MeowVault.app` to Applications.
 
 ## Uninstall
 
