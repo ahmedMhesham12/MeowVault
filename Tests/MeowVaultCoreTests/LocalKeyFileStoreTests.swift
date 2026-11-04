@@ -32,3 +32,17 @@ import Testing
     #expect(second.count == 32)
     #expect(first != second)
 }
+
+@Test func localKeyFileStoreReplacesAKeyWithTheWrongSize() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let url = directory.appendingPathComponent("storage.key")
+    try Data([1, 2, 3]).write(to: url)
+
+    let key = try LocalKeyFileStore.key(at: url)
+
+    #expect(key.count == 32)
+    #expect(try LocalKeyFileStore.key(at: url) == key)
+}

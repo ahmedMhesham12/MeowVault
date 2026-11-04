@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ClipGroup: String, Codable, CaseIterable, Hashable, Identifiable {
+public enum ClipGroup: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
     case all = "All"
     case links = "Links"
     case code = "Code"
@@ -11,12 +11,12 @@ public enum ClipGroup: String, Codable, CaseIterable, Hashable, Identifiable {
     public var id: String { rawValue }
 }
 
-public enum ClipPayload: Codable, Equatable, Hashable {
+public enum ClipPayload: Codable, Equatable, Hashable, Sendable {
     case text(String)
     case image(data: Data)
 }
 
-public struct ClipItem: Codable, Equatable, Hashable, Identifiable {
+public struct ClipItem: Codable, Equatable, Hashable, Identifiable, Sendable {
     public let id: UUID
     public let payload: ClipPayload
     public let preview: String
@@ -38,6 +38,22 @@ public struct ClipItem: Codable, Equatable, Hashable, Identifiable {
         self.group = group
         self.createdAt = createdAt
         self.isPinned = isPinned
+    }
+}
+
+extension ClipItem {
+    /// Case-insensitive match against the preview, the group name and the full clip text.
+    /// `query` must already be trimmed and non-empty.
+    public func matches(_ query: String) -> Bool {
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        if preview.range(of: query, options: options) != nil
+            || group.rawValue.range(of: query, options: options) != nil {
+            return true
+        }
+        if case .text(let value) = payload {
+            return value.range(of: query, options: options) != nil
+        }
+        return false
     }
 }
 

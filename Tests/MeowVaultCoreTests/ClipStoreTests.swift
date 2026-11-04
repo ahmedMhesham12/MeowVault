@@ -72,3 +72,32 @@ import Testing
     #expect(decoded.first?.preview == "keep me")
     #expect(decoded.first?.isPinned == true)
 }
+
+@Test func searchMatchesTextBeyondThePreviewAndIgnoresCase() {
+    let store = ClipStore(now: Date.init)
+    let longText = String(repeating: "x", count: 400) + " NeedleInTheTail"
+    store.capture(.text(longText))
+    store.capture(.text("unrelated"))
+
+    #expect(store.search("needleinthetail").count == 1)
+    #expect(store.search("   ").count == 2)
+}
+
+@Test func dedupeStillWorksAfterFingerprintsAreCached() {
+    var tick = 0
+    let store = ClipStore(limit: 2) {
+        defer { tick += 1 }
+        return Date(timeIntervalSince1970: TimeInterval(tick))
+    }
+    let image = Data(repeating: 7, count: 64)
+
+    store.capture(.image(data: image))
+    store.capture(.text("a"))
+    store.capture(.image(data: image))
+    store.capture(.text("b"))
+    store.capture(.text("b"))
+
+    #expect(store.items.count == 2)
+    #expect(store.items.first?.preview == "b")
+    #expect(store.items.filter { $0.group == .images }.count == 1)
+}

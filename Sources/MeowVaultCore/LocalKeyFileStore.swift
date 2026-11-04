@@ -1,16 +1,15 @@
 import Foundation
 
-public enum LocalKeyFileStoreError: Error {
-    case invalidExistingKey
-}
-
 public enum LocalKeyFileStore {
+    /// Returns the 32-byte storage key, creating it when missing.
+    /// A key file with the wrong size cannot decrypt anything, so it is replaced instead of crashing the app.
     public static func key(at url: URL) throws -> Data {
         if FileManager.default.fileExists(atPath: url.path) {
             let existing = try Data(contentsOf: url)
-            guard existing.count == 32 else { throw LocalKeyFileStoreError.invalidExistingKey }
-            try protect(url)
-            return existing
+            if existing.count == 32 {
+                try protect(url)
+                return existing
+            }
         }
 
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -24,5 +23,9 @@ public enum LocalKeyFileStore {
 
     private static func protect(_ url: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        var excluded = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? excluded.setResourceValues(values)
     }
 }

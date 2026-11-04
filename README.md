@@ -59,11 +59,13 @@ MeowVault stores clipboard history locally under:
 ~/Library/Application Support/MeowVault/
 ```
 
-The clipboard database is compressed, then encrypted as `clips.enc`. The local encryption key is generated per user in `storage.key` with `0600` permissions.
+The clipboard database is compressed, then encrypted as `clips.enc`. The local encryption key is generated per user in `storage.key` with `0600` permissions and is excluded from backups. The key sits next to the data, so this protects against casual file access and copies of `clips.enc` alone, not against other processes running as your user.
+
+Clips that password managers mark as concealed, transient, or auto-generated (`org.nspasteboard.*`) are never saved.
 
 In Settings, users can choose whether restart keeps all clips or only pinned clips. The history limit is also configurable, and pinned clips are kept first when the list is trimmed.
 
-The optional app password locks the MeowVault window. It is separate from storage encryption.
+The optional app password locks the MeowVault window (stored as a salted PBKDF2-SHA256 hash). It is separate from storage encryption.
 
 ## Download
 

@@ -5,6 +5,7 @@ public final class ClipStore {
     public private(set) var items: [ClipItem]
     public private(set) var limit: Int
     private let now: () -> Date
+    private var fingerprintCache: [UUID: String] = [:]
 
     public init(items: [ClipItem] = [], limit: Int = 200, now: @escaping () -> Date = Date.init) {
         self.items = items
@@ -21,7 +22,7 @@ public final class ClipStore {
         retainedItems.reserveCapacity(items.count)
 
         for item in items {
-            if Self.fingerprint(item.payload) == fingerprint {
+            if cachedFingerprint(of: item) == fingerprint {
                 existing = existing ?? item
             } else {
                 retainedItems.append(item)
@@ -35,6 +36,7 @@ public final class ClipStore {
             createdAt: now(),
             isPinned: existing?.isPinned ?? false
         )
+        fingerprintCache[item.id] = fingerprint
         items = [item] + retainedItems
         trimToLimit()
         return item
@@ -55,13 +57,9 @@ public final class ClipStore {
     }
 
     public func search(_ query: String) -> [ClipItem] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return visibleItems }
-
-        return visibleItems.filter { item in
-            item.preview.lowercased().contains(needle)
-                || item.group.rawValue.lowercased().contains(needle)
-        }
+        return visibleItems.filter { $0.matches(needle) }
     }
 
     public func togglePin(_ id: ClipItem.ID) {
@@ -86,6 +84,18 @@ public final class ClipStore {
 
     private func trimToLimit() {
         items = Array(visibleItems.prefix(limit))
+        if fingerprintCache.count > items.count {
+            let liveIDs = Set(items.map(\.id))
+            fingerprintCache = fingerprintCache.filter { liveIDs.contains($0.key) }
+        }
+    }
+
+    /// Hashing image payloads is the expensive part of dedupe, so each item is fingerprinted once.
+    private func cachedFingerprint(of item: ClipItem) -> String {
+        if let cached = fingerprintCache[item.id] { return cached }
+        let value = Self.fingerprint(item.payload)
+        fingerprintCache[item.id] = value
+        return value
     }
 
     private static func clampedLimit(_ value: Int) -> Int {
